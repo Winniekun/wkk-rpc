@@ -16,6 +16,5 @@ public class ConsumerApp {
 //        int add = consumer.add(1, 2);
 //        System.out.println(add);
         System.out.println(consumer.add(1100, 2));
-        System.out.println("111111");
     }
 }

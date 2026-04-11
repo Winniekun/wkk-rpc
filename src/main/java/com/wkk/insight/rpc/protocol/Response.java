@@ -18,7 +18,7 @@ public class Response {
 
     public static Response success(Object result) {
         Response response = new Response();
-        response.setResult(response);
+        response.setResult(result);
         response.setCode(200);
         return response;
     }
