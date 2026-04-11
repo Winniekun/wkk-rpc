@@ -4,6 +4,7 @@ import com.wkk.insight.rpc.api.Add;
 import com.wkk.insight.rpc.core.RequestEncoder;
 import com.wkk.insight.rpc.core.ResponseEncoder;
 import com.wkk.insight.rpc.core.WKKDecoder;
+import com.wkk.insight.rpc.exception.RpcException;
 import com.wkk.insight.rpc.protocol.Request;
 import com.wkk.insight.rpc.protocol.Response;
 import io.netty.bootstrap.Bootstrap;
@@ -39,9 +40,15 @@ public class Consumer implements Add {
                                     .addLast(new RequestEncoder())
                                     .addLast(new SimpleChannelInboundHandler<Response>() {
                                         @Override
-                                        protected void channelRead0(ChannelHandlerContext channelHandlerContext, Response message) throws Exception {
-                                            Integer result = Integer.valueOf(message.getResult().toString());
-                                            addResult.complete(result);
+                                        protected void channelRead0(ChannelHandlerContext channelHandlerContext, Response response) throws Exception {
+                                            System.out.println("response: " + response);
+                                            if (response.getCode() == 200) {
+                                                Integer result = Integer.valueOf(response.getResult().toString());
+                                                addResult.complete(result);
+                                            } else {
+                                                String errorMessage = response.getErrorMessage();
+                                                addResult.completeExceptionally(new RpcException(errorMessage));
+                                            }
                                         }
                                     });
                         }

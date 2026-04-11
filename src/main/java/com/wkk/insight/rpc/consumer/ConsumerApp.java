@@ -11,9 +11,11 @@ import java.util.concurrent.ExecutionException;
  */
 public class ConsumerApp {
 
-    public static void main(String[] args) throws ExecutionException, InterruptedException {
+    public static void main(String[] args) {
         Add consumer = new Consumer();
-        System.out.println(consumer.add(1, 2));
-        System.out.println(consumer.add(12, 2));
+//        int add = consumer.add(1, 2);
+//        System.out.println(add);
+        System.out.println(consumer.add(1100, 2));
+        System.out.println("111111");
     }
 }

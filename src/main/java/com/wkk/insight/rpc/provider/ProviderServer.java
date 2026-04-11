@@ -11,12 +11,14 @@ import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * 类描述: TODO
  *
  * @author weikunkun
  */
+@Slf4j
 public class ProviderServer {
 
     private NioEventLoopGroup bossGroup;
@@ -50,18 +52,7 @@ public class ProviderServer {
                             nioServerSocketChannel.pipeline()
                                     .addLast(new WKKDecoder())
                                     .addLast(new ResponseEncoder())
-                                    .addLast(new SimpleChannelInboundHandler<Request>() {
-                                        @Override
-                                        protected void channelRead0(ChannelHandlerContext channelHandlerContext, Request request) throws Exception {
-                                            // 并不是所有的方法都能被执行，譬如provider的私有方法等，所以需要一个注册表维护可用方法，使用接口进行约定支持使用的方法
-                                            System.out.println("get request" +  " " + request);
-                                            ProviderRegistry.Invocation<?> service = providerRegistry.findService(request.getServiceName());
-                                            Object result = service.invoke(request.getMethodName(), request.getParameterTypes(), request.getParams());
-                                            Response response = new Response();
-                                            response.setResult(result);
-                                            channelHandlerContext.writeAndFlush(response);
-                                        }
-                                    });
+                                    .addLast(new ProviderHandler());
                         }
                     });
 
@@ -70,6 +61,48 @@ public class ProviderServer {
             throw new RuntimeException("服务异常" + e);
         }
 
+    }
+
+    public class ProviderHandler extends SimpleChannelInboundHandler<Request> {
+
+        @Override
+        protected void channelRead0(ChannelHandlerContext channelHandlerContext, Request request) throws Exception {
+            // 并不是所有的方法都能被执行，譬如provider的私有方法等，所以需要一个注册表维护可用方法，使用接口进行约定支持使用的方法
+            System.out.println("get request" + " " + request);
+            ProviderRegistry.Invocation<?> service = providerRegistry.findService(request.getServiceName());
+            if (service == null) {
+                Response fail = Response.fail("not found service " + request.getServiceName());
+                channelHandlerContext.writeAndFlush(fail);
+                return;
+            }
+            try {
+                Object result = service.invoke(request.getMethodName(), request.getParameterTypes(), request.getParams());
+                Response success = Response.success(result);
+                log.info("{} 函数被调用, result: {}", request.getServiceName(), result);
+                channelHandlerContext.writeAndFlush(success);
+            } catch (Exception e) {
+                Response fail = Response.fail(e.getMessage());
+                channelHandlerContext.writeAndFlush(fail);
+            }
+        }
+
+        @Override
+        public void channelActive(ChannelHandlerContext ctx) throws Exception {
+            log.info("地址：{} 链接了", ctx.channel().remoteAddress());
+        }
+
+        @Override
+        public void channelInactive(ChannelHandlerContext ctx) throws Exception {
+            log.info("地址：{} 断开了链接", ctx.channel().remoteAddress());
+
+        }
+
+        @Override
+        public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
+            log.info("exception", cause);
+            ctx.channel().close();
+
+        }
     }
 
     public void stop() {
@@ -81,6 +114,7 @@ public class ProviderServer {
             workerGroup.shutdownGracefully();
         }
     }
+
 
     private static int add(int a, int b) {
         return a + b;
