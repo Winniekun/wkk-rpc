@@ -25,8 +25,15 @@ public class ProviderServer {
 
     private final int port;
 
+    private ProviderRegistry providerRegistry;
+
     public ProviderServer(int port) {
         this.port = port;
+        this.providerRegistry = new ProviderRegistry();
+    }
+
+    public <I> void register(Class<I> interfaceClass, I serviceInstance) {
+        providerRegistry.register(interfaceClass, serviceInstance);
     }
 
     public void start() {
@@ -45,10 +52,13 @@ public class ProviderServer {
                                     .addLast(new ResponseEncoder())
                                     .addLast(new SimpleChannelInboundHandler<Request>() {
                                         @Override
-                                        protected void channelRead0(ChannelHandlerContext channelHandlerContext, Request message) throws Exception {
-                                            System.out.println("get message" +  " " + message);
+                                        protected void channelRead0(ChannelHandlerContext channelHandlerContext, Request request) throws Exception {
+                                            // 并不是所有的方法都能被执行，譬如provider的私有方法等，所以需要一个注册表维护可用方法，使用接口进行约定支持使用的方法
+                                            System.out.println("get request" +  " " + request);
+                                            ProviderRegistry.Invocation<?> service = providerRegistry.findService(request.getServiceName());
+                                            Object result = service.invoke(request.getMethodName(), request.getParameterTypes(), request.getParams());
                                             Response response = new Response();
-                                            response.setResult("1");
+                                            response.setResult(result);
                                             channelHandlerContext.writeAndFlush(response);
                                         }
                                     });

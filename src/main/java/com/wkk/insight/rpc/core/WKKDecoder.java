@@ -1,6 +1,7 @@
 package com.wkk.insight.rpc.core;
 
 import com.alibaba.fastjson2.JSONObject;
+import com.alibaba.fastjson2.JSONReader;
 import com.wkk.insight.rpc.protocol.Message;
 import com.wkk.insight.rpc.protocol.Request;
 import com.wkk.insight.rpc.protocol.Response;
@@ -34,30 +35,32 @@ public class WKKDecoder extends LengthFieldBasedFrameDecoder {
         if (frame == null) {
             return null;
         }
-        byte[] logic = new byte[Message.MESSAGE_LOGIC.length];
-        frame.readBytes(logic);
-        if (!Arrays.equals(logic, Message.MESSAGE_LOGIC)) {
+        byte[] magic = new byte[Message.MESSAGE_LOGIC.length];
+        frame.readBytes(magic);
+        if (!Arrays.equals(magic, Message.MESSAGE_LOGIC)) {
             throw new RuntimeException("协议错误！,可能链接了错误的服务器");
         }
         byte messageType = frame.readByte();
+        byte[] body = new byte[frame.readableBytes()];
+        frame.readBytes(body);
         if (Objects.equals(Message.MessageType.REQUEST.getNumber(), messageType)) {
-            return decodeRequest(frame);
+            return deserializeRequest(body);
         }
         if (Objects.equals(Message.MessageType.RESPONSE.getNumber(), messageType)) {
-            return decodeResponse(frame);
+            return deserializeResponse(body);
 
         }
         throw new RuntimeException("协议错误！,可能链接了错误的服务器");
     }
 
-    private Request decodeRequest(ByteBuf in) {
-        String json = in.readCharSequence(in.readableBytes(), StandardCharsets.UTF_8).toString();
-        return JSONObject.parseObject(json, Request.class);
+
+    private Response deserializeResponse(byte[] body) {
+        return JSONObject.parseObject(new String(body, StandardCharsets.UTF_8), Response.class);
     }
 
-    private Response decodeResponse(ByteBuf in) {
-        String json = in.readCharSequence(in.readableBytes(),StandardCharsets.UTF_8).toString();
-        return JSONObject.parseObject(json, Response.class);
+    private Request deserializeRequest(byte[] body) {
+        return JSONObject.parseObject(new String(body, StandardCharsets.UTF_8), Request.class,
+                JSONReader.Feature.SupportClassForName);
     }
 
 }

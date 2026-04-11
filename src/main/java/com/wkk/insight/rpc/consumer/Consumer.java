@@ -1,5 +1,6 @@
 package com.wkk.insight.rpc.consumer;
 
+import com.wkk.insight.rpc.api.Add;
 import com.wkk.insight.rpc.core.RequestEncoder;
 import com.wkk.insight.rpc.core.ResponseEncoder;
 import com.wkk.insight.rpc.core.WKKDecoder;
@@ -21,37 +22,40 @@ import java.util.concurrent.ExecutionException;
  *
  * @author weikunkun
  */
-public class Consumer {
+public class Consumer implements Add {
 
-    public int add(int a, int b) throws InterruptedException, ExecutionException {
-        CompletableFuture<Integer> addResult = new CompletableFuture<>();
-        Bootstrap bootstrap = new Bootstrap();
-        bootstrap.group(new NioEventLoopGroup(4))
-                .channel(NioSocketChannel.class)
-                .handler(new ChannelInitializer<NioSocketChannel>() {
-                    @Override
-                    protected void initChannel(NioSocketChannel nioSocketChannel) throws Exception {
-                        nioSocketChannel.pipeline()
-                                .addLast(new WKKDecoder())
-                                .addLast(new RequestEncoder())
-                                .addLast(new SimpleChannelInboundHandler<Response>() {
-                                    @Override
-                                    protected void channelRead0(ChannelHandlerContext channelHandlerContext, Response message) throws Exception {
-//                                        int res = Integer.parseInt(message);
-                                        System.out.println("consumer " +  message);
-                                        int result = Integer.parseInt((String) message.getResult());
-                                        addResult.complete(result);
-                                    }
-                                });
-                    }
-                });
-        ChannelFuture channelFuture = bootstrap.connect("localhost", 8888).sync();
-        Request request = new Request();
-        request.setServiceName("serviceName");
-        request.setMethodName("method");
-        request.setParams(new Object[]{a, b});
-        request.setParameterTypes(new String[]{"int", "int"});
-        channelFuture.channel().writeAndFlush(request);
-        return addResult.get();
+    @Override
+    public int add(int a, int b)  {
+        try {
+            CompletableFuture<Integer> addResult = new CompletableFuture<>();
+            Bootstrap bootstrap = new Bootstrap();
+            bootstrap.group(new NioEventLoopGroup(4))
+                    .channel(NioSocketChannel.class)
+                    .handler(new ChannelInitializer<NioSocketChannel>() {
+                        @Override
+                        protected void initChannel(NioSocketChannel nioSocketChannel) throws Exception {
+                            nioSocketChannel.pipeline()
+                                    .addLast(new WKKDecoder())
+                                    .addLast(new RequestEncoder())
+                                    .addLast(new SimpleChannelInboundHandler<Response>() {
+                                        @Override
+                                        protected void channelRead0(ChannelHandlerContext channelHandlerContext, Response message) throws Exception {
+                                            Integer result = Integer.valueOf(message.getResult().toString());
+                                            addResult.complete(result);
+                                        }
+                                    });
+                        }
+                    });
+            ChannelFuture channelFuture = bootstrap.connect("localhost", 8888).sync();
+            Request request = new Request();
+            request.setServiceName(Add.class.getName());
+            request.setMethodName("add");
+            request.setParameterTypes(new Class[]{int.class, int.class});
+            request.setParams(new Object[]{a, b});
+            channelFuture.channel().writeAndFlush(request);
+            return addResult.get();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 }
