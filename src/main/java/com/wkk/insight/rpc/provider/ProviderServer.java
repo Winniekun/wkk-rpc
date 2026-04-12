@@ -71,17 +71,17 @@ public class ProviderServer {
             System.out.println("get request" + " " + request);
             ProviderRegistry.Invocation<?> service = providerRegistry.findService(request.getServiceName());
             if (service == null) {
-                Response fail = Response.fail("not found service " + request.getServiceName());
+                Response fail = Response.fail("not found service " + request.getServiceName(), request.getRequestId());
                 channelHandlerContext.writeAndFlush(fail);
                 return;
             }
             try {
                 Object result = service.invoke(request.getMethodName(), request.getParameterTypes(), request.getParams());
-                Response success = Response.success(result);
+                Response success = Response.success(result, request.getRequestId());
                 log.info("{} 函数被调用, result: {}", request.getServiceName(), result);
                 channelHandlerContext.writeAndFlush(success);
             } catch (Exception e) {
-                Response fail = Response.fail(e.getMessage());
+                Response fail = Response.fail(e.getMessage(), request.getRequestId());
                 channelHandlerContext.writeAndFlush(fail);
             }
         }

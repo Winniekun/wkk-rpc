@@ -191,3 +191,74 @@ sequenceDiagram
 ## 说明
 
 当前仓库主要用于 RPC 通信链路与协议演进验证。随着后续迭代，README 会同步更新完整时序图、配置项和测试说明。
+
+
+
+
+
+```
+@startuml
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam rectangle {
+  RoundCorner 15
+}
+skinparam defaultTextAlignment center
+
+rectangle "int result = demoService.sayHello(param)" as callExpr #FDEDEC
+
+rectangle "Consumer\n(服务消费者)" as Consumer #D5F5E3
+rectangle "Provider\n(服务提供者)" as Provider #D5F5E3
+
+rectangle "Java Interface\n(e.g. DemoService)" as IDL #E8DAEF
+
+package "Consumer 侧" #D6EAF8 {
+  rectangle "Proxy / Stub\n(动态代理)\nproxy0.sayHello()" as CProxy #F9E79F
+  rectangle "Cluster\n(路由 / 负载均衡 / 容错)" as Cluster #F9E79F
+  rectangle "Invoker\n(统一调用抽象)" as CInvoker #F9E79F
+  rectangle "Filter Chain\n(监控/日志/鉴权等)" as CFilter #F9E79F
+}
+
+package "Dubbo RPC Framework" #D6EAF8 {
+  rectangle "Codec\n(请求对象 -> 字节流)" as Codec1 #FCF3CF
+  rectangle "Protocol\n(Dubbo Protocol)" as Protocol1 #FCF3CF
+  rectangle "Transfer\n(Netty / TCP)" as Transfer1 #FCF3CF
+
+  rectangle "Transfer\n(Netty / TCP)" as Transfer2 #FCF3CF
+  rectangle "Protocol\n(Dubbo Protocol)" as Protocol2 #FCF3CF
+  rectangle "Codec\n(字节流 -> 请求对象)" as Codec2 #FCF3CF
+}
+
+package "Provider 侧" #D6EAF8 {
+  rectangle "Exporter / Invoker\n(服务暴露与调用入口)" as PInvoker #F9E79F
+  rectangle "Filter Chain\n(限流/鉴权/日志等)" as PFilter #F9E79F
+  rectangle "Reflection Invoke\n(反射调用目标方法)" as Reflect #F9E79F
+}
+
+rectangle "demoServiceImpl.sayHello(param)" as implExpr #FDEDEC
+
+Consumer -down-> CProxy
+CProxy -down-> Cluster
+Cluster -down-> CInvoker
+CInvoker -down-> CFilter
+CFilter -down-> Codec1
+Codec1 -down-> Protocol1
+Protocol1 -down-> Transfer1
+
+Transfer1 -right-> Transfer2
+
+Transfer2 -up-> Protocol2
+Protocol2 -up-> Codec2
+Codec2 -up-> PInvoker
+PInvoker -up-> PFilter
+PFilter -up-> Reflect
+Reflect -up-> Provider
+
+Provider -up-> implExpr
+
+IDL ..left.. CProxy : 服务契约
+IDL ..right.. PInvoker : 服务暴露契约
+
+@enduml
+```
+

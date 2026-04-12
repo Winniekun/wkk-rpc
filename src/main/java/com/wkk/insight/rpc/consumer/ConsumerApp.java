@@ -12,9 +12,14 @@ import java.util.concurrent.ExecutionException;
 public class ConsumerApp {
 
     public static void main(String[] args) {
-        Add consumer = new Consumer();
-//        int add = consumer.add(1, 2);
-//        System.out.println(add);
-        System.out.println(consumer.add(1100, 2));
+        ConsumerProxyFactory consumerProxyFactory = new ConsumerProxyFactory();
+        Add consumerProxy = consumerProxyFactory.getConsumerProxy(Add.class);
+        System.out.println(consumerProxy.add(1, 2));
+        System.out.println(consumerProxy.add(1, 2));
+        System.out.println(consumerProxy.add(1100, 2));
+        System.out.println(consumerProxy.add(1100, 2));
+        System.out.println(consumerProxy.add(1100, 2));
+        System.out.println(consumerProxy.add(1100, 2));
+        System.out.println(consumerProxy.add(1100, 2));
     }
 }
