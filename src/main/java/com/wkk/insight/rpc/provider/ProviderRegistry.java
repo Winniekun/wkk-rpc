@@ -1,7 +1,11 @@
 package com.wkk.insight.rpc.provider;
 
+import com.google.common.collect.Lists;
+
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -27,6 +31,10 @@ public class ProviderRegistry {
 
     public Invocation<?> findService(String serviceName) {
         return serviceInstanceMap.get(serviceName);
+    }
+
+    public List<String> allServiceName() {
+        return new ArrayList<>(this.serviceInstanceMap.keySet());
     }
 
     public static class Invocation<I> {

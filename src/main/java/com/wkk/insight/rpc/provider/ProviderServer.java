@@ -4,6 +4,10 @@ import com.wkk.insight.rpc.core.ResponseEncoder;
 import com.wkk.insight.rpc.core.WKKDecoder;
 import com.wkk.insight.rpc.protocol.Request;
 import com.wkk.insight.rpc.protocol.Response;
+import com.wkk.insight.rpc.register.DefaultServiceRegister;
+import com.wkk.insight.rpc.register.RegisterConfig;
+import com.wkk.insight.rpc.register.ServiceMetadata;
+import com.wkk.insight.rpc.register.ServiceRegister;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInitializer;
@@ -27,21 +31,33 @@ public class ProviderServer {
 
     private final int port;
 
-    private ProviderRegistry providerRegistry;
+    private final String host;
 
-    public ProviderServer(int port) {
+    private ProviderRegistry registry;
+
+    private final ServiceRegister serviceRegister;
+
+    private final RegisterConfig registerConfig;
+
+
+
+    public ProviderServer(String host, int port, RegisterConfig registerConfig) {
+        this.host = host;
         this.port = port;
-        this.providerRegistry = new ProviderRegistry();
+        this.registry = new ProviderRegistry();
+        this.serviceRegister = new DefaultServiceRegister();
+        this.registerConfig = registerConfig;
     }
 
     public <I> void register(Class<I> interfaceClass, I serviceInstance) {
-        providerRegistry.register(interfaceClass, serviceInstance);
+        registry.register(interfaceClass, serviceInstance);
     }
 
     public void start() {
         bossGroup = new NioEventLoopGroup();
         workerGroup = new NioEventLoopGroup(4);
         try {
+            this.serviceRegister.init(registerConfig);
             ServerBootstrap serverBootstrap = new ServerBootstrap();
             serverBootstrap.group(bossGroup, workerGroup)
                     .channel(NioServerSocketChannel.class)
@@ -57,10 +73,20 @@ public class ProviderServer {
                     });
 
             serverBootstrap.bind(this.port).sync();
+            // 将绑定的服务注册到注册表中
+            registry.allServiceName().stream().map(this::buildMetadata).forEach(this.serviceRegister::registerService);
         } catch (Exception e) {
             throw new RuntimeException("服务异常" + e);
         }
 
+    }
+
+    private ServiceMetadata buildMetadata(String serviceName) {
+        ServiceMetadata metadata = new ServiceMetadata();
+        metadata.setServiceName(serviceName);
+        metadata.setPort(port);
+        metadata.setHost(host);
+        return metadata;
     }
 
     public class ProviderHandler extends SimpleChannelInboundHandler<Request> {
@@ -69,7 +95,7 @@ public class ProviderServer {
         protected void channelRead0(ChannelHandlerContext channelHandlerContext, Request request) throws Exception {
             // 并不是所有的方法都能被执行，譬如provider的私有方法等，所以需要一个注册表维护可用方法，使用接口进行约定支持使用的方法
             System.out.println("get request" + " " + request);
-            ProviderRegistry.Invocation<?> service = providerRegistry.findService(request.getServiceName());
+            ProviderRegistry.Invocation<?> service = registry.findService(request.getServiceName());
             if (service == null) {
                 Response fail = Response.fail("not found service " + request.getServiceName(), request.getRequestId());
                 channelHandlerContext.writeAndFlush(fail);

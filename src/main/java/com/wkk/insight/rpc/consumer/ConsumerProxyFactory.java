@@ -6,6 +6,10 @@ import com.wkk.insight.rpc.core.WKKDecoder;
 import com.wkk.insight.rpc.exception.RpcException;
 import com.wkk.insight.rpc.protocol.Request;
 import com.wkk.insight.rpc.protocol.Response;
+import com.wkk.insight.rpc.register.DefaultServiceRegister;
+import com.wkk.insight.rpc.register.RegisterConfig;
+import com.wkk.insight.rpc.register.ServiceMetadata;
+import com.wkk.insight.rpc.register.ServiceRegister;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
@@ -18,6 +22,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -34,6 +39,15 @@ public class ConsumerProxyFactory {
     private final Map<Integer, CompletableFuture<Response>> inFlightRequests = new ConcurrentHashMap<>();
 
     private final ConnectionManager connectionManager = new ConnectionManager(createBootstrap());
+
+    private final ServiceRegister register;
+
+
+    public ConsumerProxyFactory(RegisterConfig registerConfig) throws Exception {
+        this.register = new DefaultServiceRegister();
+        this.register.init(registerConfig);
+    }
+
 
     private Bootstrap createBootstrap() {
         Bootstrap bootstrap = new Bootstrap();
@@ -70,8 +84,14 @@ public class ConsumerProxyFactory {
                 }
                 try {
                     CompletableFuture<Response> addResult = new CompletableFuture<>();
-                    Channel localhost = connectionManager.getChannel("localhost", 8888);
-                    if (localhost == null) {
+                    List<ServiceMetadata> serviceMetadata = register.fetchServiceList(interfaceClass.getName());
+                    if (serviceMetadata.isEmpty()) {
+                        throw new RpcException(interfaceClass.getName() + "没有对应的provider");
+                    }
+                    ServiceMetadata providerMetadata = serviceMetadata.get(0);
+                    // 改为从注册中心获取可用的服务地址
+                    Channel channel = connectionManager.getChannel(providerMetadata.getHost(), providerMetadata.getPort());
+                    if (channel == null) {
                         throw new RpcException("provider 链接失败");
                     }
                     Request request = new Request();
@@ -79,7 +99,7 @@ public class ConsumerProxyFactory {
                     request.setMethodName(method.getName());
                     request.setParams(args);
                     request.setParameterTypes(method.getParameterTypes());
-                    localhost.writeAndFlush(request).addListener((f) -> {
+                    channel.writeAndFlush(request).addListener((f) -> {
                         if (f.isSuccess()) {
                             inFlightRequests.put(request.getRequestId(), addResult);
                         }
