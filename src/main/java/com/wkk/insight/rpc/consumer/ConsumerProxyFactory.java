@@ -3,6 +3,9 @@ package com.wkk.insight.rpc.consumer;
 import com.wkk.insight.rpc.core.RequestEncoder;
 import com.wkk.insight.rpc.core.WKKDecoder;
 import com.wkk.insight.rpc.exception.RpcException;
+import com.wkk.insight.rpc.loadbalance.LoadBalancer;
+import com.wkk.insight.rpc.loadbalance.RandomLoadBalancer;
+import com.wkk.insight.rpc.loadbalance.RoundRobinLoadBalancer;
 import com.wkk.insight.rpc.protocol.Request;
 import com.wkk.insight.rpc.protocol.Response;
 import com.wkk.insight.rpc.register.DefaultServiceRegister;
@@ -44,6 +47,8 @@ public class ConsumerProxyFactory {
 
     private ConsumerProperties consumerProperties;
 
+    private LoadBalancer loadBalancer;
+
 
     public ConsumerProxyFactory(ConsumerProperties consumerProperties) throws Exception {
         this.register = new DefaultServiceRegister();
@@ -57,7 +62,19 @@ public class ConsumerProxyFactory {
     public <I> I createConsumerProxy(Class<I> interfaceClass) {
         return (I) Proxy.newProxyInstance(Thread.currentThread().getContextClassLoader(),
                 new Class[]{interfaceClass},
-                new ConsumerInvocationHandler(interfaceClass));
+                new ConsumerInvocationHandler(interfaceClass, createLoadBalancer()));
+
+    }
+
+    private LoadBalancer createLoadBalancer() {
+        switch (this.consumerProperties.getLoadBalancePolicy()) {
+            case "robin":
+                return new RoundRobinLoadBalancer();
+            case "random":
+                return new RandomLoadBalancer();
+            default:
+                throw new IllegalArgumentException(this.consumerProperties.getLoadBalancePolicy() + "负载均衡不支持");
+        }
 
     }
 
@@ -65,8 +82,11 @@ public class ConsumerProxyFactory {
 
         final Class<?> interfaceClass;
 
-        public ConsumerInvocationHandler(Class<?> interfaceClass) {
+        final LoadBalancer loadBalancer;
+
+        public ConsumerInvocationHandler(Class<?> interfaceClass, LoadBalancer loadBalancer) {
             this.interfaceClass = interfaceClass;
+            this.loadBalancer = loadBalancer;
         }
 
         @Override
@@ -80,7 +100,8 @@ public class ConsumerProxyFactory {
                 if (serviceMetadata.isEmpty()) {
                     throw new RpcException(interfaceClass.getName() + "没有对应的provider");
                 }
-                ServiceMetadata providerMetadata = serviceMetadata.get(0);
+                // 负载过高 每次都获取固定服务, 使用负载均衡
+                ServiceMetadata providerMetadata = loadBalancer.select(serviceMetadata);
                 Channel channel = manager.getChannel(providerMetadata.getHost(), providerMetadata.getPort());
                 if (channel == null) {
                     throw new RpcException("provider 连接失败");

@@ -14,12 +14,14 @@ public class ProviderApp {
         RegisterConfig registerConfig = new RegisterConfig();
         registerConfig.setRegisterType("zookeeper");
         registerConfig.setConnectString("127.0.0.1:2181");
-        ProviderProperties providerProperties = new ProviderProperties();
-        providerProperties.setPort(8887);
-        providerProperties.setRegisterConfig(registerConfig);
-        providerProperties.setHost("127.0.0.1");
-        ProviderServer providerServer = new ProviderServer(providerProperties);
-        providerServer.register(Add.class, new AddImpl());
-        providerServer.start();
+        for (int i = 0; i < 5; i++) {
+            ProviderProperties providerProperties = new ProviderProperties();
+            providerProperties.setPort(8887 + i);
+            providerProperties.setRegisterConfig(registerConfig);
+            providerProperties.setHost("127.0.0.1");
+            ProviderServer providerServer = new ProviderServer(providerProperties);
+            providerServer.register(Add.class, new AddImpl());
+            providerServer.start();
+        }
     }
 }
