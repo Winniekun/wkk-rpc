@@ -29,24 +29,18 @@ public class ProviderServer {
 
     private NioEventLoopGroup workerGroup;
 
-    private final int port;
-
-    private final String host;
+   private ProviderProperties providerProperties;
 
     private ProviderRegistry registry;
 
     private final ServiceRegister serviceRegister;
 
-    private final RegisterConfig registerConfig;
 
 
-
-    public ProviderServer(String host, int port, RegisterConfig registerConfig) {
-        this.host = host;
-        this.port = port;
+    public ProviderServer(ProviderProperties providerProperties) {
         this.registry = new ProviderRegistry();
         this.serviceRegister = new DefaultServiceRegister();
-        this.registerConfig = registerConfig;
+        this.providerProperties = providerProperties;
     }
 
     public <I> void register(Class<I> interfaceClass, I serviceInstance) {
@@ -55,9 +49,9 @@ public class ProviderServer {
 
     public void start() {
         bossGroup = new NioEventLoopGroup();
-        workerGroup = new NioEventLoopGroup(4);
+        workerGroup = new NioEventLoopGroup(providerProperties.getWorkerThreads());
         try {
-            this.serviceRegister.init(registerConfig);
+            this.serviceRegister.init(providerProperties.getRegisterConfig());
             ServerBootstrap serverBootstrap = new ServerBootstrap();
             serverBootstrap.group(bossGroup, workerGroup)
                     .channel(NioServerSocketChannel.class)
@@ -72,7 +66,7 @@ public class ProviderServer {
                         }
                     });
 
-            serverBootstrap.bind(this.port).sync();
+            serverBootstrap.bind(this.providerProperties.getPort()).sync();
             // 将绑定的服务注册到注册表中
             registry.allServiceName().stream().map(this::buildMetadata).forEach(this.serviceRegister::registerService);
         } catch (Exception e) {
@@ -84,8 +78,8 @@ public class ProviderServer {
     private ServiceMetadata buildMetadata(String serviceName) {
         ServiceMetadata metadata = new ServiceMetadata();
         metadata.setServiceName(serviceName);
-        metadata.setPort(port);
-        metadata.setHost(host);
+        metadata.setPort(providerProperties.getPort());
+        metadata.setHost(providerProperties.getHost());
         return metadata;
     }
 
