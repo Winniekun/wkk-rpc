@@ -12,7 +12,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 @Data
 public class Request {
 
-    private final AtomicInteger REQUEST_COUNTER = new AtomicInteger(0);
+    private static final AtomicInteger REQUEST_COUNTER = new AtomicInteger(0);
 
     private int requestId = REQUEST_COUNTER.getAndIncrement();
 

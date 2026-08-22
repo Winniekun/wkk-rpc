@@ -32,7 +32,7 @@ public class DefaultServiceRegister implements ServiceRegister {
 
     @Override
     public void registerService(ServiceMetadata metadata) {
-        log.info("向{} 注册了一个Service{}", delegate.getClass(), metadata.getServiceName());
+        log.info("向{} 注册了一个Service{}, port: {}", delegate.getClass(), metadata.getServiceName(), metadata.getPort());
         delegate.registerService(metadata);
     }
 

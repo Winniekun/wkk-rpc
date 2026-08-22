@@ -1,5 +1,6 @@
 package com.wkk.insight.rpc.consumer;
 
+import com.google.common.collect.Lists;
 import com.wkk.insight.rpc.core.RequestEncoder;
 import com.wkk.insight.rpc.core.WKKDecoder;
 import com.wkk.insight.rpc.exception.RpcException;
@@ -11,6 +12,9 @@ import com.wkk.insight.rpc.protocol.Response;
 import com.wkk.insight.rpc.register.DefaultServiceRegister;
 import com.wkk.insight.rpc.register.ServiceMetadata;
 import com.wkk.insight.rpc.register.ServiceRegister;
+import com.wkk.insight.rpc.retry.RetryContext;
+import com.wkk.insight.rpc.retry.RetryPolicy;
+import com.wkk.insight.rpc.retry.RetryPolicyManager;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
@@ -19,6 +23,8 @@ import io.netty.channel.ChannelOption;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioSocketChannel;
+import io.netty.util.HashedWheelTimer;
+import io.netty.util.Timeout;
 import lombok.extern.slf4j.Slf4j;
 
 import java.lang.reflect.InvocationHandler;
@@ -28,7 +34,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * 类描述: TODO
@@ -45,24 +53,26 @@ public class ConsumerProxyFactory {
 
     private final ServiceRegister register;
 
-    private ConsumerProperties consumerProperties;
+    private final ConsumerProperties consumerProperties;
 
-    private LoadBalancer loadBalancer;
+    private final HashedWheelTimer hashedWheelTimer;
 
+    private final RetryPolicyManager retryPolicyManager;
 
     public ConsumerProxyFactory(ConsumerProperties consumerProperties) throws Exception {
         this.register = new DefaultServiceRegister();
         this.register.init(consumerProperties.getRegistryConfig());
-        this.manager= new ConnectionManager(createBootstrap(consumerProperties));
+        this.manager = new ConnectionManager(createBootstrap(consumerProperties));
         this.inFlightRequests = new ConcurrentHashMap<>();
         this.consumerProperties = consumerProperties;
-
+        this.hashedWheelTimer = new HashedWheelTimer(100, TimeUnit.MILLISECONDS, 256);
+        this.retryPolicyManager = new RetryPolicyManager();
     }
 
     public <I> I createConsumerProxy(Class<I> interfaceClass) {
         return (I) Proxy.newProxyInstance(Thread.currentThread().getContextClassLoader(),
                 new Class[]{interfaceClass},
-                new ConsumerInvocationHandler(interfaceClass, createLoadBalancer()));
+                new ConsumerInvocationHandler(interfaceClass, createLoadBalancer(), createRetryPolicy()));
 
     }
 
@@ -78,15 +88,27 @@ public class ConsumerProxyFactory {
 
     }
 
+    private RetryPolicy createRetryPolicy() {
+        RetryPolicy retryPolicy = retryPolicyManager.getRetryPolicy(this.consumerProperties.getRetryPolicy());
+        if(retryPolicy == null){
+            throw new IllegalArgumentException("没有这个重试策略 " + this.consumerProperties.getRetryPolicy());
+        }
+        return retryPolicy;
+
+    }
+
     public class ConsumerInvocationHandler implements InvocationHandler {
 
         final Class<?> interfaceClass;
 
         final LoadBalancer loadBalancer;
 
-        public ConsumerInvocationHandler(Class<?> interfaceClass, LoadBalancer loadBalancer) {
+        final RetryPolicy retryPolicy;
+
+        public ConsumerInvocationHandler(Class<?> interfaceClass, LoadBalancer loadBalancer, RetryPolicy retryPolicy) {
             this.interfaceClass = interfaceClass;
             this.loadBalancer = loadBalancer;
+            this.retryPolicy = retryPolicy;
         }
 
         @Override
@@ -94,7 +116,6 @@ public class ConsumerProxyFactory {
             if (method.getDeclaringClass() == Object.class) {
                 return invokeObjectMethod(proxy, method, args);
             }
-            CompletableFuture<Response> responseFuture = new CompletableFuture<>();
             try {
                 List<ServiceMetadata> serviceMetadata = register.fetchServiceList(interfaceClass.getName());
                 if (serviceMetadata.isEmpty()) {
@@ -102,19 +123,34 @@ public class ConsumerProxyFactory {
                 }
                 // 负载过高 每次都获取固定服务, 使用负载均衡
                 ServiceMetadata providerMetadata = loadBalancer.select(serviceMetadata);
-                Channel channel = manager.getChannel(providerMetadata.getHost(), providerMetadata.getPort());
-                if (channel == null) {
-                    throw new RpcException("provider 连接失败");
+                // 添加重试机制
+                Response response;
+                try {
+                    response = tryRpcSync(buildRequest(method, args), providerMetadata, consumerProperties.getRequestTimeoutMs());
+                } catch (Exception e) {
+                    // 重试
+                    RetryContext retryContext = RetryContext.builder()
+                            .failService(providerMetadata)
+                            .serviceMetadataList(serviceMetadata)
+                            .loadBalancer(loadBalancer)
+                            .requestTimeoutMs(consumerProperties.getRequestTimeoutMs())
+                            .methodTimeoutMs(consumerProperties.getMethodTimeoutMs())
+                            .doRpcFunction(meta -> tryRpcAsync(buildRequest(method, args), meta))
+                            .build();
+                    response = retryPolicy.doRetry(retryContext);
                 }
-                Request request = buildRequest(method, args);
-                inFlightRequests.put(request.getRequestId(), responseFuture);
-                channel.writeAndFlush(request).addListener(f -> {
-                    if (!f.isSuccess()) {
-                        inFlightRequests.remove(request.getRequestId());
-                        responseFuture.completeExceptionally(f.cause());
-                    }
-                });
-                Response response = responseFuture.get(consumerProperties.getRequestTimeoutMs(), TimeUnit.MILLISECONDS);
+//                Channel channel = manager.getChannel(providerMetadata.getHost(), providerMetadata.getPort());
+//                if (channel == null) {
+//                    throw new RpcException("provider 连接失败");
+//                }
+//                inFlightRequests.put(request.getRequestId(), responseFuture);
+//                channel.writeAndFlush(request).addListener(f -> {
+//                    if (!f.isSuccess()) {
+//                        inFlightRequests.remove(request.getRequestId());
+//                        responseFuture.completeExceptionally(f.cause());
+//                    }
+//                });
+//                Response response = responseFuture.get(consumerProperties.getRequestTimeoutMs(), TimeUnit.MILLISECONDS);
                 return processResponse(response);
             } catch (RpcException rpcException) {
                 throw rpcException;
@@ -170,7 +206,36 @@ public class ConsumerProxyFactory {
         return bootstrap;
     }
 
-    private class ConsumerHandler extends SimpleChannelInboundHandler<Response>{
+    private CompletableFuture<Response> tryRpcAsync(Request request, ServiceMetadata serviceMetadata) {
+        CompletableFuture<Response> responseFuture = new CompletableFuture<>();
+        Channel channel = manager.getChannel(serviceMetadata.getHost(), serviceMetadata.getPort());
+        if (channel == null) {
+            responseFuture.completeExceptionally(new RpcException("provider 获取失败"));
+            return responseFuture;
+        }
+        inFlightRequests.put(request.getRequestId(), responseFuture);
+        Timeout timeout = hashedWheelTimer.newTimeout(
+                t -> responseFuture.completeExceptionally(new TimeoutException()),
+                consumerProperties.getRequestTimeoutMs(),
+                TimeUnit.MILLISECONDS);
+
+        responseFuture.whenComplete((r, e) -> {
+            inFlightRequests.remove(request.getRequestId());
+            timeout.cancel();
+        });
+        channel.writeAndFlush(request).addListener(f -> {
+            if (!f.isSuccess()) {
+                responseFuture.completeExceptionally(f.cause());
+            }
+        });
+        return responseFuture;
+    }
+
+    private Response tryRpcSync(Request request, ServiceMetadata serviceMetadata, long timeoutMs) throws ExecutionException, InterruptedException, TimeoutException {
+        return tryRpcAsync(request, serviceMetadata).get(timeoutMs, TimeUnit.MILLISECONDS);
+    }
+
+    private class ConsumerHandler extends SimpleChannelInboundHandler<Response> {
         @Override
         protected void channelRead0(ChannelHandlerContext channelHandlerContext, Response response) throws Exception {
             CompletableFuture<Response> responseFuture = inFlightRequests.remove(response.getRequestId());
@@ -180,6 +245,7 @@ public class ConsumerProxyFactory {
             }
             responseFuture.complete(response);
         }
+
         @Override
         public void channelActive(ChannelHandlerContext ctx) throws Exception {
             log.info("地址:{}连接了", ctx.channel().remoteAddress());
